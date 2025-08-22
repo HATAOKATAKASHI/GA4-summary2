@@ -2,7 +2,7 @@ name: GA4 Daily Report Summary New
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs every day at midnight UTC
+    - cron: '0 0 * * *' # Runs every day at midnight UTC (9 AM JST)
   workflow_dispatch: # Allows manual triggering
 
 jobs:
@@ -37,11 +37,22 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ga4-report
-        path: report.txt
+        path: report.csv
 
     - name: Summarize with Gemini
+      id: gemini_summary
       uses: 'google-github-actions/run-gemini-cli@v0'
       with:
-        prompt: "Please summarize the following Google Analytics report. Provide key insights and trends in a concise way. The report is in the file 'report.txt'."
+        prompt: "以下のGoogle Analyticsレポート（CSV形式）を要約し、主要なインサイトと傾向を簡潔にまとめてください。特に、国別、ブラウザ別のユーザー動向やエンゲージメント率に着目してください。レポートは'report.csv'ファイルにあります。"
         gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
-        include: "report.txt"
+        include: "report.csv"
+
+    - name: Create GitHub Issue
+      uses: peter-evans/create-issue@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        title: "GA4 Daily Summary Report"
+        body: |
+          ## Google Analytics Daily Summary
+
+          ${{ steps.gemini_summary.outputs.summary }}
