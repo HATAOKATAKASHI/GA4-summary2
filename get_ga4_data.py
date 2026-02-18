@@ -1,62 +1,143 @@
 import os
+from datetime import date, timedelta
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
     DateRange,
     Dimension,
     Metric,
     RunReportRequest,
+    OrderBy,
 )
 from google import genai
 
-def get_ga4_report():
+def get_month_ranges():
+    today = date.today()
+    # 先月
+    first_day_this_month = today.replace(day=1)
+    last_day_last_month = first_day_this_month - timedelta(days=1)
+    first_day_last_month = last_day_last_month.replace(day=1)
+    
+    # 前月（比較用）
+    last_day_prev_month = first_day_last_month - timedelta(days=1)
+    first_day_prev_month = last_day_prev_month.replace(day=1)
+    
+    return (
+        first_day_last_month.strftime("%Y-%m-%d"), last_day_last_month.strftime("%Y-%m-%d"),
+        first_day_prev_month.strftime("%Y-%m-%d"), last_day_prev_month.strftime("%Y-%m-%d")
+    )
+
+def fetch_ga4_data():
     property_id = os.environ.get("GA4_PROPERTY_ID")
     if not property_id:
         raise ValueError("GA4_PROPERTY_ID environment variable not set")
-
-    client = BetaAnalyticsDataClient()
-
-    # 【変更箇所】「先月」ではなく、「過去90日間〜今日まで」の広い範囲でデータを取得します
-    request = RunReportRequest(
-        property=f"properties/{property_id}",
-        dimensions=[
-            Dimension(name="sessionSourceMedium"),
-            Dimension(name="deviceCategory"),
-        ],
-        metrics=[
-            Metric(name="sessions"),
-            Metric(name="engagementRate"),
-            Metric(name="conversions"),
-        ],
-        date_ranges=[DateRange(start_date="90daysAgo", end_date="today")],
-    )
-    response = client.run_report(request)
-
-    # AIに読み込ませるためのCSVテキストを作成
-    csv_data = "sessionSourceMedium,deviceCategory,sessions,engagementRate,conversions\n"
-    for row in response.rows:
-        dims = [d.value for d in row.dimension_values]
-        mets = [m.value for m in row.metric_values]
-        csv_data += ",".join(dims + mets) + "\n"
         
-    return csv_data
+    client = BetaAnalyticsDataClient()
+    start_last, end_last, start_prev, end_prev = get_month_ranges()
 
-def analyze_with_gemini(csv_data):
+    # 1. KPIの取得 (先月と前月)
+    def get_kpi(start, end):
+        request = RunReportRequest(
+            property=f"properties/{property_id}",
+            date_ranges=[DateRange(start_date=start, end_date=end)],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="totalUsers"),
+                Metric(name="newUsers"),
+                Metric(name="screenPageViews"),
+                Metric(name="engagedSessions"),
+                Metric(name="averageSessionDuration"),
+                Metric(name="engagementRate"),
+                Metric(name="conversions"),
+            ]
+        )
+        response = client.run_report(request)
+        if response.rows:
+            return [float(m.value) for m in response.rows[0].metric_values]
+        return [0] * 8
+
+    kpi_last = get_kpi(start_last, end_last)
+    kpi_prev = get_kpi(start_prev, end_prev)
+
+    # 前月比の計算関数
+    def calc_mom(last, prev):
+        if prev == 0:
+            return "前月データなし"
+        return f"{(last / prev) * 100:.1f}%"
+
+    metrics_names = [
+        "セッション数", "総ユーザー数", "新規ユーザー数", "ページ表示回数", 
+        "エンゲージのあったセッション数", "平均エンゲージメント時間(秒)", 
+        "エンゲージメント率", "キーイベント数(CV)"
+    ]
+    
+    # AIに渡すためのテキスト生成
+    kpi_text = "【先月 vs 前月 KPI比較】\n"
+    for i, name in enumerate(metrics_names):
+        val_last = kpi_last[i]
+        val_prev = kpi_prev[i]
+        mom = calc_mom(val_last, val_prev)
+        
+        if name == "エンゲージメント率":
+            kpi_text += f"- {name}: {val_last*100:.1f}% (前月比: {mom})\n"
+        elif name == "平均エンゲージメント時間(秒)":
+            kpi_text += f"- {name}: {val_last:.1f}秒 (前月比: {mom})\n"
+        else:
+            kpi_text += f"- {name}: {int(val_last)} (前月比: {mom})\n"
+
+    # 2. ランディングページTOP5
+    request_lp = RunReportRequest(
+        property=f"properties/{property_id}",
+        date_ranges=[DateRange(start_date=start_last, end_date=end_last)],
+        dimensions=[Dimension(name="landingPagePlusQueryString")],
+        metrics=[Metric(name="sessions")],
+        order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
+        limit=5
+    )
+    res_lp = client.run_report(request_lp)
+    lp_text = "\n【ランディングページ TOP 5】\n"
+    for i, row in enumerate(res_lp.rows):
+        lp_text += f"{i+1}. {row.dimension_values[0].value} ({row.metric_values[0].value} セッション)\n"
+
+    # 3. 参照元/メディアTOP5
+    request_sm = RunReportRequest(
+        property=f"properties/{property_id}",
+        date_ranges=[DateRange(start_date=start_last, end_date=end_last)],
+        dimensions=[Dimension(name="sessionSourceMedium")],
+        metrics=[Metric(name="sessions")],
+        order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="sessions"), desc=True)],
+        limit=5
+    )
+    res_sm = client.run_report(request_sm)
+    sm_text = "\n【参照元／メディア TOP 5】\n"
+    for i, row in enumerate(res_sm.rows):
+        sm_text += f"{i+1}. {row.dimension_values[0].value} ({row.metric_values[0].value} セッション)\n"
+
+    return kpi_text + lp_text + sm_text
+
+def analyze_with_gemini(data_text):
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable not set")
         
     client = genai.Client(api_key=api_key)
     
+    # ---------------------------------------------------------
+    # ↓ ご要望通り、プロンプトの役割（前提）を書き換えました ↓
+    # ---------------------------------------------------------
     prompt = f"""
-    あなたは高級輸入車（ポルシェ、マセラティ、BMW、ランドローバー等）を扱う販売店「Dutton ONE」の専属Webマーケターです。
-    以下のGoogle Analytics（GA4）レポートは、過去90日間のWebサイトのセッションおよびコンバージョンデータです。
-    このデータを分析し、以下の2点を簡潔に提案してください。結論ファーストで出力してください。
-    
-    1. 最も伸びている、あるいは重要なチャネル（参照元）とその理由
-    2. CVR（コンバージョン率）を最大化するための次月のアクションプランを3つ
-    
+    あなたは、GA4に精通した大変優秀なマーケターです。
+    以下のGoogle Analytics（GA4）データは、先月と前月のWebサイトの実績です。
+    このデータを元に、月次レポートを作成してください。
+
+    【出力の絶対ルール】
+    1. 挨拶や自己紹介（「Webマーケターの〇〇です」など）は一切書かないでください。最初の文字から直接レポートの内容（見出し等）を書き始めてください。
+    2. 提供した【KPI比較】【TOP5】のデータは、マークダウンで見やすい表やリスト形式にして、レポートの冒頭に必ずすべて記載してください。
+    3. そのデータの後に、プロの視点で以下の2点の分析・提案を記載してください。
+       - 最も伸びている、あるいは重要なチャネル（参照元）とその理由
+       - CVR（コンバージョン率）を最大化するための次月のアクションプランを3つ
+
     【GA4データ】
-    {csv_data}
+    {data_text}
     """
     
     response = client.models.generate_content(
@@ -69,7 +150,7 @@ def analyze_with_gemini(csv_data):
 
 if __name__ == "__main__":
     print("GA4からデータを取得中...")
-    csv_data = get_ga4_report()
+    data_text = fetch_ga4_data()
     print("Geminiでデータを分析中...")
-    analyze_with_gemini(csv_data)
+    analyze_with_gemini(data_text)
     print("分析完了！issue_body.md を作成しました。")
