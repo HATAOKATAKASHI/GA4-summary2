@@ -44,4 +44,11 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        # 記録用としてGitHubのIssueにも投稿しておきます
         gh issue create --title "【月次】GA4自動分析レポート＆施策提案" --body-file issue_body.md
+
+    - name: Send Full Report to Slack
+      run: |
+        # 作成されたレポート全文を読み込み、安全な形式に変換してSlackに直接長文送信します
+        REPORT_TEXT=$(cat issue_body.md)
+        jq -n --arg text "📊 *【月次】GA4自動分析レポート*\n\n$REPORT_TEXT" '{text: $text}' | curl -X POST -H 'Content-type: application/json' -d @- ${{ secrets.SLACK_WEBHOOK_URL }}
