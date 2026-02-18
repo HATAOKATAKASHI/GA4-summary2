@@ -1,9 +1,14 @@
-name: GA4 Daily Report Summary New
+name: Monthly GA4 Report Summary
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs every day at midnight UTC (9 AM JST)
-  workflow_dispatch: # Allows manual triggering
+    - cron: '0 0 1 * *' 
+  workflow_dispatch: 
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
 
 jobs:
   build:
@@ -26,7 +31,8 @@ jobs:
     - id: 'auth'
       uses: 'google-github-actions/auth@v2'
       with:
-        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+        workload_identity_provider: '${{ secrets.WIF_PROVIDER }}'
+        service_account: '${{ secrets.GCP_SA_EMAIL }}'
 
     - name: Fetch GA4 Report
       env:
@@ -43,7 +49,7 @@ jobs:
       id: gemini_summary
       uses: 'google-github-actions/run-gemini-cli@v0'
       with:
-        prompt: "以下のGoogle Analyticsレポート（CSV形式）を要約し、主要なインサイトと傾向を簡潔にまとめてください。特に、国別、ブラウザ別のユーザー動向やエンゲージメント率に着目してください。レポートは'report.csv'ファイルにあります。"
+        prompt: "添付のGoogle Analyticsレポート（CSV）は先月1ヶ月間のデータです。このデータを分析し、「先月対比で最も伸びている/重要なチャネル（参照元）」と「CVRを最大化するための次月のアクションプランを3つ」簡潔に提案してください。結論ファーストで出力してください。"
         gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
         include: "report.csv"
 
@@ -51,8 +57,8 @@ jobs:
       uses: peter-evans/create-issue@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        title: "GA4 Daily Summary Report"
+        title: "【月次】GA4自動分析レポート＆施策提案"
         body: |
-          ## Google Analytics Daily Summary
+          ## 先月のWeb分析およびネクストアクション提案
 
           ${{ steps.gemini_summary.outputs.summary }}
