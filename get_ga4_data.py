@@ -7,7 +7,7 @@ from google.analytics.data_v1beta.types import (
     Metric,
     RunReportRequest,
 )
-import google.generativeai as genai
+from google import genai
 
 def get_last_month_dates():
     today = date.today()
@@ -53,7 +53,8 @@ def analyze_with_gemini(csv_data):
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable not set")
         
-    genai.configure(api_key=api_key)
+    # 最新の公式パッケージでGeminiに接続
+    client = genai.Client(api_key=api_key)
     
     prompt = f"""
     あなたは高級輸入車（ポルシェ、マセラティ、BMW、ランドローバー等）を扱う販売店「Dutton ONE」の専属Webマーケターです。
@@ -67,15 +68,11 @@ def analyze_with_gemini(csv_data):
     {csv_data}
     """
     
-    try:
-        # まずは賢い上位モデル（1.5-pro）で試行
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        response = model.generate_content(prompt)
-    except Exception as e:
-        # 万が一見つからない場合は、100%動く安定版（gemini-pro）に自動で切り替え
-        print("上位モデルでエラーが発生したため、安定版モデル(gemini-pro)に切り替えて分析します。")
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
+    # 安定して動作する最新モデル（gemini-1.5-flash）を指定
+    response = client.models.generate_content(
+        model='gemini-1.5-flash',
+        contents=prompt,
+    )
         
     # GitHubのIssue投稿用にMarkdownファイルを作成
     with open("issue_body.md", "w", encoding="utf-8") as f:
