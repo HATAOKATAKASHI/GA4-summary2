@@ -1,5 +1,4 @@
 import os
-import csv
 from datetime import date, timedelta
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
@@ -8,6 +7,7 @@ from google.analytics.data_v1beta.types import (
     Metric,
     RunReportRequest,
 )
+import google.generativeai as genai
 
 def get_last_month_dates():
     today = date.today()
@@ -39,12 +39,44 @@ def get_ga4_report():
     )
     response = client.run_report(request)
 
-    with open("report.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        header = [h.name for h in response.dimension_headers] + [h.name for h in response.metric_headers]
-        writer.writerow(header)
-        for row in response.rows:
-            writer.writerow([d.value for d in row.dimension_values] + [m.value for m in row.metric_values])
+    # AIに読み込ませるためのCSVテキストを作成
+    csv_data = "sessionSourceMedium,deviceCategory,sessions,engagementRate,conversions\n"
+    for row in response.rows:
+        dims = [d.value for d in row.dimension_values]
+        mets = [m.value for m in row.metric_values]
+        csv_data += ",".join(dims + mets) + "\n"
+        
+    return csv_data
+
+def analyze_with_gemini(csv_data):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+        
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = f"""
+    あなたは高級輸入車（ポルシェ、マセラティ、BMW、ランドローバー等）を扱う販売店「Dutton ONE」の専属Webマーケターです。
+    以下のGoogle Analytics（GA4）レポートは、先月1ヶ月間のWebサイトのセッションおよびコンバージョンデータです。
+    このデータを分析し、以下の2点を簡潔に提案してください。結論ファーストで出力してください。
+    
+    1. 最も伸びている、あるいは重要なチャネル（参照元）とその理由
+    2. CVR（コンバージョン率）を最大化するための次月のアクションプランを3つ
+    
+    【GA4データ】
+    {csv_data}
+    """
+    
+    response = model.generate_content(prompt)
+    
+    # GitHubのIssue投稿用にMarkdownファイルを作成
+    with open("issue_body.md", "w", encoding="utf-8") as f:
+        f.write(response.text)
 
 if __name__ == "__main__":
-    get_ga4_report()
+    print("GA4からデータを取得中...")
+    csv_data = get_ga4_report()
+    print("Geminiでデータを分析中...")
+    analyze_with_gemini(csv_data)
+    print("分析完了！issue_body.md を作成しました。")
