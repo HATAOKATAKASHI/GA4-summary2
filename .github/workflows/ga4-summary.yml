@@ -26,7 +26,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install google-analytics-data
+        pip install google-analytics-data google-generativeai
 
     - id: 'auth'
       uses: 'google-github-actions/auth@v2'
@@ -34,31 +34,14 @@ jobs:
         workload_identity_provider: '${{ secrets.WIF_PROVIDER }}'
         service_account: '${{ secrets.GCP_SA_EMAIL }}'
 
-    - name: Fetch GA4 Report
+    - name: Fetch GA4 Report and Analyze with Gemini
       env:
         GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: python get_ga4_data.py
 
-    - name: Upload GA4 Report
-      uses: actions/upload-artifact@v4
-      with:
-        name: ga4-report
-        path: report.csv
-
-    - name: Summarize with Gemini
-      id: gemini_summary
-      uses: 'google-github-actions/run-gemini-cli@v0'
-      with:
-        prompt: "添付のGoogle Analyticsレポート（CSV）は先月1ヶ月間のデータです。このデータを分析し、「先月対比で最も伸びている/重要なチャネル（参照元）」と「CVRを最大化するための次月のアクションプランを3つ」簡潔に提案してください。結論ファーストで出力してください。"
-        gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
-        include: "report.csv"
-
     - name: Create GitHub Issue
-      uses: peter-evans/create-issue-action@v5
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        title: "【月次】GA4自動分析レポート＆施策提案"
-        body: |
-          ## 先月のWeb分析およびネクストアクション提案
-
-          ${{ steps.gemini_summary.outputs.summary }}
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh issue create --title "【月次】GA4自動分析レポート＆施策提案" --body-file issue_body.md
