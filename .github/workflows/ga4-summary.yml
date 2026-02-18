@@ -54,7 +54,7 @@ jobs:
         include: "report.csv"
 
     - name: Create GitHub Issue
-      uses: peter-evans/create-issue@v5
+      uses: peter-evans/create-issue-action@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         title: "【月次】GA4自動分析レポート＆施策提案"
