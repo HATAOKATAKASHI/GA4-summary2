@@ -54,7 +54,6 @@ def analyze_with_gemini(csv_data):
         raise ValueError("GEMINI_API_KEY environment variable not set")
         
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
     あなたは高級輸入車（ポルシェ、マセラティ、BMW、ランドローバー等）を扱う販売店「Dutton ONE」の専属Webマーケターです。
@@ -68,8 +67,16 @@ def analyze_with_gemini(csv_data):
     {csv_data}
     """
     
-    response = model.generate_content(prompt)
-    
+    try:
+        # まずは賢い上位モデル（1.5-pro）で試行
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        response = model.generate_content(prompt)
+    except Exception as e:
+        # 万が一見つからない場合は、100%動く安定版（gemini-pro）に自動で切り替え
+        print("上位モデルでエラーが発生したため、安定版モデル(gemini-pro)に切り替えて分析します。")
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        
     # GitHubのIssue投稿用にMarkdownファイルを作成
     with open("issue_body.md", "w", encoding="utf-8") as f:
         f.write(response.text)
