@@ -68,9 +68,9 @@ def analyze_with_gemini(csv_data):
     {csv_data}
     """
     
-    # 安定して動作する最新モデル（gemini-1.5-flash）を指定
+    # 【修正箇所】廃止された1.5ではなく、現在稼働している最新モデル「gemini-2.5-flash」を指定します
     response = client.models.generate_content(
-        model='gemini-1.5-flash',
+        model='gemini-2.5-flash',
         contents=prompt,
     )
         
